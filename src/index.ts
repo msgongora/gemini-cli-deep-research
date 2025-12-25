@@ -11,16 +11,40 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // Initialize SDK and Managers
-const apiKey = process.env.GEMINI_DEEP_RESEARCH_API_KEY || process.env.GEMINI_API_KEY;
+const useVertexAI = process.env.GOOGLE_GENAI_USE_VERTEXAI === 'true';
 
-if (!apiKey) {
-  console.error('Error: API key not found.');
-  console.error('Please set either GEMINI_DEEP_RESEARCH_API_KEY or GEMINI_API_KEY environment variable.');
-  process.exit(1);
+let client: GoogleGenAI;
+
+if (useVertexAI) {
+  // Vertex AI mode: uses Application Default Credentials (ADC)
+  // Authenticate with: gcloud auth application-default login
+  const project = process.env.GOOGLE_CLOUD_PROJECT;
+  const location = process.env.GOOGLE_CLOUD_LOCATION;
+
+  if (!project || !location) {
+    console.error('Error: Vertex AI mode requires GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION environment variables.');
+    console.error('Also ensure you have run: gcloud auth application-default login');
+    process.exit(1);
+  }
+
+  client = new GoogleGenAI({ vertexai: true, project, location });
+  console.error(`Using Vertex AI authentication (project: ${project}, location: ${location})`);
+} else {
+  // API Key mode
+  const apiKey = process.env.GEMINI_DEEP_RESEARCH_API_KEY || process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    console.error('Error: API key not found.');
+    console.error('Please set GEMINI_DEEP_RESEARCH_API_KEY or GEMINI_API_KEY environment variable.');
+    console.error('Alternatively, use Vertex AI mode by setting:');
+    console.error('  GOOGLE_GENAI_USE_VERTEXAI=true');
+    console.error('  GOOGLE_CLOUD_PROJECT=your-project-id');
+    console.error('  GOOGLE_CLOUD_LOCATION=us-central1');
+    process.exit(1);
+  }
+
+  client = new GoogleGenAI({ apiKey });
 }
-
-const client = new GoogleGenAI({ apiKey });
-
 const defaultModel = process.env.GEMINI_DEEP_RESEARCH_MODEL || process.env.GEMINI_MODEL || 'models/gemini-flash-latest';
 
 const fileSearchManager = new FileSearchManager(client);
@@ -144,7 +168,7 @@ server.registerTool(
       const outputs = (interaction.outputs || []) as any[];
       const textOutput = outputs.find(o => o.type === 'text');
       const text = textOutput?.text || 'No response generated.';
-      
+
       return { content: [{ type: 'text', text }] };
     } catch (error: any) {
       return { isError: true, content: [{ type: 'text', text: `Query failed: ${error.message}` }] };
@@ -179,11 +203,11 @@ server.registerTool(
     if (interaction.id) {
         WorkspaceConfigManager.addResearchId(interaction.id);
     }
-    return { 
-      content: [{ 
-        type: 'text', 
-        text: `Research started. ID: ${interaction.id}\nStatus: ${interaction.status}\nUse research_status to check progress.` 
-      }] 
+    return {
+      content: [{
+        type: 'text',
+        text: `Research started. ID: ${interaction.id}\nStatus: ${interaction.status}\nUse research_status to check progress.`
+      }]
     };
   }
 );
@@ -216,7 +240,7 @@ server.registerTool(
     if (interaction.status !== 'completed') {
       return { isError: true, content: [{ type: 'text', text: `Interaction ${id} is not completed. Current status: ${interaction.status}` }] };
     }
-    
+
     if (!interaction.outputs) {
       return { isError: true, content: [{ type: 'text', text: 'No outputs found for this interaction.' }] };
     }
